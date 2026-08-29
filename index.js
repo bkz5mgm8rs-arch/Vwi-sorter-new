@@ -153,7 +153,14 @@ client.on("interactionCreate", async (interaction) => {
       }),
     });
     const data = await res.json().catch(() => ({}));
-    await interaction.editReply(data.content ?? "Stock command failed (" + res.status + ").");
+    const payload = {};
+    if (data.content) payload.content = data.content;
+    if (Array.isArray(data.embeds) && data.embeds.length) payload.embeds = data.embeds;
+    if (Array.isArray(data.components) && data.components.length)
+      payload.components = data.components;
+    if (!payload.content && !payload.embeds)
+      payload.content = "Stock command failed (" + res.status + ").";
+    await interaction.editReply(payload);
   } catch (err) {
     console.error("stock relay failed:", err);
     await interaction.editReply("Could not reach the VWI Sorter site.");
