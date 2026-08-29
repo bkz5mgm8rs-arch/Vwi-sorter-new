@@ -38,52 +38,52 @@ if (token.split(".").length !== 3) {
 // /stock add | remove | set | view
 const stockCommand = new SlashCommandBuilder()
   .setName("stock")
-  .setDescription("Add, remove, change or view SellAuth stock")
+  .setDescription("Manage and showcase your SellAuth stock")
   .addSubcommand((s) =>
     s
       .setName("view")
-      .setDescription("Show current stock lines")
-      .addStringOption((o) => o.setName("product").setDescription("Product name or id").setRequired(true))
-      .addStringOption((o) => o.setName("variant").setDescription("Variant name or id"))
+      .setDescription("Inspect current stock lines for a product variant")
+      .addStringOption((o) => o.setName("product").setDescription("Product name or ID").setRequired(true))
+      .addStringOption((o) => o.setName("variant").setDescription("Variant name or ID (optional)"))
   )
   .addSubcommand((s) =>
     s
       .setName("add")
-      .setDescription("Add stock lines")
-      .addStringOption((o) => o.setName("product").setDescription("Product name or id").setRequired(true))
-      .addStringOption((o) => o.setName("lines").setDescription("Lines separated by |").setRequired(true))
-      .addStringOption((o) => o.setName("variant").setDescription("Variant name or id"))
+      .setDescription("Append new stock lines to a product variant")
+      .addStringOption((o) => o.setName("product").setDescription("Product name or ID").setRequired(true))
+      .addStringOption((o) => o.setName("lines").setDescription("Stock lines, separated by |").setRequired(true))
+      .addStringOption((o) => o.setName("variant").setDescription("Variant name or ID (optional)"))
   )
   .addSubcommand((s) =>
     s
       .setName("remove")
-      .setDescription("Remove stock lines (exact lines, or the first N)")
-      .addStringOption((o) => o.setName("product").setDescription("Product name or id").setRequired(true))
-      .addStringOption((o) => o.setName("variant").setDescription("Variant name or id"))
-      .addStringOption((o) => o.setName("lines").setDescription("Exact lines to remove, separated by |"))
-      .addIntegerOption((o) => o.setName("count").setDescription("How many lines to remove"))
+      .setDescription("Remove specific stock lines, or the first N lines")
+      .addStringOption((o) => o.setName("product").setDescription("Product name or ID").setRequired(true))
+      .addStringOption((o) => o.setName("variant").setDescription("Variant name or ID (optional)"))
+      .addStringOption((o) => o.setName("lines").setDescription("Exact stock lines to remove, separated by |"))
+      .addIntegerOption((o) => o.setName("count").setDescription("How many lines to remove from the top"))
   )
   .addSubcommand((s) =>
     s
       .setName("set")
-      .setDescription("Change the stock count (service / dynamic variants)")
-      .addStringOption((o) => o.setName("product").setDescription("Product name or id").setRequired(true))
-      .addIntegerOption((o) => o.setName("count").setDescription("New stock count").setRequired(true))
-      .addStringOption((o) => o.setName("variant").setDescription("Variant name or id"))
+      .setDescription("Set an exact stock count for a service or dynamic variant")
+      .addStringOption((o) => o.setName("product").setDescription("Product name or ID").setRequired(true))
+      .addIntegerOption((o) => o.setName("count").setDescription("The new stock count").setRequired(true))
+      .addStringOption((o) => o.setName("variant").setDescription("Variant name or ID (optional)"))
   )
   .addSubcommand((s) =>
     s
       .setName("addfile")
-      .setDescription("Add stock from an uploaded .txt file (one line per item)")
-      .addStringOption((o) => o.setName("product").setDescription("Product name or id").setRequired(true))
-      .addAttachmentOption((o) => o.setName("file").setDescription("Text file with stock lines").setRequired(true))
-      .addStringOption((o) => o.setName("variant").setDescription("Variant name or id"))
+      .setDescription("Bulk-import stock from a .txt file (one item per line)")
+      .addStringOption((o) => o.setName("product").setDescription("Product name or ID").setRequired(true))
+      .addAttachmentOption((o) => o.setName("file").setDescription("A .txt file containing one stock line per row").setRequired(true))
+      .addStringOption((o) => o.setName("variant").setDescription("Variant name or ID (optional)"))
   )
   .addSubcommand((s) =>
     s
       .setName("live")
-      .setDescription("Live SellAuth stock with buy now links")
-      .addStringOption((o) => o.setName("product").setDescription("Filter by product name"))
+      .setDescription("Post a live storefront listing with prices and a Buy now button")
+      .addStringOption((o) => o.setName("product").setDescription("Only show products matching this name"))
   )
   .toJSON();
 
@@ -127,13 +127,13 @@ client.on("interactionCreate", async (interaction) => {
       const text = await (await fetch(file.url)).text();
       const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       if (lines.length === 0) {
-        await interaction.editReply("That file has no stock lines.");
+        await interaction.editReply("⚠️ That file contains no usable stock lines.");
         return;
       }
       options.lines = lines.join("\n");
       apiSub = "add";
     } catch {
-      await interaction.editReply("Could not download that file.");
+      await interaction.editReply("⚠️ Could not download that attachment. Please try again.");
       return;
     }
   }
@@ -159,11 +159,11 @@ client.on("interactionCreate", async (interaction) => {
     if (Array.isArray(data.components) && data.components.length)
       payload.components = data.components;
     if (!payload.content && !payload.embeds)
-      payload.content = "Stock command failed (" + res.status + ").";
+      payload.content = "⚠️ The stock request failed (HTTP " + res.status + "). Please try again shortly.";
     await interaction.editReply(payload);
   } catch (err) {
     console.error("stock relay failed:", err);
-    await interaction.editReply("Could not reach the VWI Sorter site.");
+    await interaction.editReply("⚠️ Could not reach the VWI Sorter dashboard. Check the SITE URL and try again.");
   }
 });
 
