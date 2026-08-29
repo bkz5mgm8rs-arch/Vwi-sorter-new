@@ -2,7 +2,8 @@
   "name": "vwi-sorter-presence",
   "private": true,
   "type": "module",
-  "scripts": { "start": "node index.js" },
+  "main": "index.js",
+  "scripts": { "build": "npm install", "start": "node index.js" },
   "dependencies": { "discord.js": "^14.16.3" },
   "engines": { "node": ">=20" }
 }
