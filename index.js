@@ -71,6 +71,20 @@ const stockCommand = new SlashCommandBuilder()
       .addIntegerOption((o) => o.setName("count").setDescription("New stock count").setRequired(true))
       .addStringOption((o) => o.setName("variant").setDescription("Variant name or id"))
   )
+  .addSubcommand((s) =>
+    s
+      .setName("addfile")
+      .setDescription("Add stock from an uploaded .txt file (one line per item)")
+      .addStringOption((o) => o.setName("product").setDescription("Product name or id").setRequired(true))
+      .addAttachmentOption((o) => o.setName("file").setDescription("Text file with stock lines").setRequired(true))
+      .addStringOption((o) => o.setName("variant").setDescription("Variant name or id"))
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("live")
+      .setDescription("Live SellAuth stock with buy now links")
+      .addStringOption((o) => o.setName("product").setDescription("Filter by product name"))
+  )
   .toJSON();
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -104,12 +118,30 @@ client.on("interactionCreate", async (interaction) => {
   const count = interaction.options.getInteger("count");
   if (count !== null && count !== undefined) options.count = String(count);
 
+  let apiSub = sub;
+  if (sub === "addfile") {
+    const file = interaction.options.getAttachment("file");
+    try {
+      const text = await (await fetch(file.url)).text();
+      const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      if (lines.length === 0) {
+        await interaction.editReply("That file has no stock lines.");
+        return;
+      }
+      options.lines = lines.join("\n");
+      apiSub = "add";
+    } catch {
+      await interaction.editReply("Could not download that file.");
+      return;
+    }
+  }
+
   try {
     const res = await fetch(SITE + "/api/public/discord/stock", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bot " + token },
       body: JSON.stringify({
-        sub,
+        sub: apiSub,
         options,
         guildId: interaction.guildId,
         roles: interaction.member?.roles?.cache
