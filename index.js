@@ -107,9 +107,11 @@ client.once("clientReady", async () => {
 
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand() || interaction.commandName !== "stock") return;
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
   const sub = interaction.options.getSubcommand();
+  // /stock live is a public storefront listing — everyone in the channel sees it.
+  await interaction.deferReply(sub === "live" ? {} : { flags: MessageFlags.Ephemeral });
+
+
   const options = {};
   for (const key of ["product", "variant", "lines"]) {
     const v = interaction.options.getString(key);
