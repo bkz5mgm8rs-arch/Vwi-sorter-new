@@ -175,6 +175,33 @@ const saCommand = new SlashCommandBuilder()
   .toJSON();
 
 
+// /replacements — read-only view of the auto replacement system
+const replacementsCommand = new SlashCommandBuilder()
+  .setName("replacements")
+  .setDescription("Auto replacement system: activity, pending requests and stock")
+  .addSubcommand((s) => s.setName("overview").setDescription("Totals for completed, pending and failed replacements"))
+  .addSubcommand((s) =>
+    s
+      .setName("recent")
+      .setDescription("See the latest replacements that were issued")
+      .addIntegerOption((o) => o.setName("limit").setDescription("How many to show (1-20)"))
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("pending")
+      .setDescription("Replacements waiting for staff approval")
+      .addIntegerOption((o) => o.setName("limit").setDescription("How many to show (1-20)"))
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("logs")
+      .setDescription("Full activity log: checks, attempts, approvals and denials")
+      .addIntegerOption((o) => o.setName("limit").setDescription("How many to show (1-20)"))
+  )
+  .addSubcommand((s) => s.setName("stock").setDescription("Replacement stock available right now"))
+  .toJSON();
+
+
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once("clientReady", async () => {
@@ -187,9 +214,9 @@ client.once("clientReady", async () => {
   try {
     const rest = new REST({ version: "10" }).setToken(token);
     await rest.put(Routes.applicationCommands(client.user.id), {
-      body: [stockCommand, eldoradoCommand, saCommand],
+      body: [stockCommand, eldoradoCommand, saCommand, replacementsCommand],
     });
-    console.log("Registered /stock, /eldorado and /sa");
+    console.log("Registered /stock, /eldorado, /sa and /replacements");
   } catch (err) {
     console.error("Could not register commands:", err);
   }
@@ -354,6 +381,43 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.editReply(payload);
   } catch (err) {
     console.error("sa relay failed:", err);
+    await interaction.editReply("⚠️ Could not reach the VWI Sorter dashboard.");
+  }
+});
+
+// /replacements — forwarded to the dashboard, which re-checks roles.
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand() || interaction.commandName !== "replacements") return;
+  const sub = interaction.options.getSubcommand();
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const options = {};
+  const limit = interaction.options.getInteger("limit");
+  if (limit !== null && limit !== undefined) options.limit = String(limit);
+
+  try {
+    const res = await fetch(SITE + "/api/public/discord/replacements", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bot " + token },
+      body: JSON.stringify({
+        sub,
+        options,
+        guildId: interaction.guildId,
+        roles: interaction.member?.roles?.cache
+          ? [...interaction.member.roles.cache.keys()]
+          : (interaction.member?.roles ?? []),
+        actor: interaction.user.username,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    const payload = {};
+    if (data.content && data.content !== "unauthorized") payload.content = data.content;
+    if (Array.isArray(data.embeds) && data.embeds.length) payload.embeds = data.embeds;
+    if (!payload.content && !payload.embeds)
+      payload.content = "⚠️ The replacement request failed (HTTP " + res.status + ").";
+    await interaction.editReply(payload);
+  } catch (err) {
+    console.error("replacements relay failed:", err);
     await interaction.editReply("⚠️ Could not reach the VWI Sorter dashboard.");
   }
 });
