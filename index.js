@@ -108,6 +108,72 @@ const stockCommand = new SlashCommandBuilder()
   )
   .toJSON();
 
+// /eldorado — Eldorado Seller Center reporting + sync
+const eldoradoCommand = new SlashCommandBuilder()
+  .setName("eldorado")
+  .setDescription("Eldorado Seller Center: stock, offers, orders and sync")
+  .addSubcommand((s) => s.setName("overview").setDescription("Connection status and totals"))
+  .addSubcommand((s) => s.setName("stock").setDescription("Available Eldorado inventory"))
+  .addSubcommand((s) => s.setName("offers").setDescription("Cached Eldorado offers"))
+  .addSubcommand((s) => s.setName("orders").setDescription("Recent Eldorado orders"))
+  .addSubcommand((s) =>
+    s
+      .setName("order")
+      .setDescription("Look up one order")
+      .addStringOption((o) => o.setName("id").setDescription("Order ID").setRequired(true))
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("search")
+      .setDescription("Search inventory by internal ID, title or offer")
+      .addStringOption((o) => o.setName("query").setDescription("What to search for").setRequired(true))
+  )
+  .addSubcommand((s) => s.setName("sync").setDescription("Sync offers and orders from Eldorado"))
+  .toJSON();
+
+// /sa — SellAuth shop management
+const sub = (name, description, options = []) => (s) => {
+  s.setName(name).setDescription(description);
+  for (const o of options) {
+    if (o.choices) {
+      s.addStringOption((x) => {
+        x.setName(o.name).setDescription(o.description).setRequired(!!o.required);
+        for (const c of o.choices) x.addChoices({ name: c, value: c });
+        return x;
+      });
+    } else {
+      s.addStringOption((x) =>
+        x.setName(o.name).setDescription(o.description).setRequired(!!o.required)
+      );
+    }
+  }
+  return s;
+};
+const opt = (name, description, required = false, choices = null) => ({ name, description, required, choices });
+
+const saCommand = new SlashCommandBuilder()
+  .setName("sa")
+  .setDescription("SellAuth shop management")
+  .addSubcommand(sub("products", "List all products in the shop", [opt("search", "Filter by name")]))
+  .addSubcommand(sub("product", "View details of a specific product", [opt("product", "Product name or ID", true)]))
+  .addSubcommand(sub("addproduct", "Create a new product", [opt("name", "Product name", true), opt("price", "Price, e.g. 9.99", true), opt("description", "Product description"), opt("variant", "First variant name"), opt("currency", "Currency code (default USD)")]))
+  .addSubcommand(sub("editproduct", "Edit an existing product", [opt("product", "Product name or ID", true), opt("name", "New name"), opt("price", "New price for every variant"), opt("description", "New description")]))
+  .addSubcommand(sub("deleteproduct", "Delete a product", [opt("product", "Product name or ID", true), opt("confirm", "Type yes to confirm", true)]))
+  .addSubcommand(sub("orders", "List recent orders", [opt("limit", "How many (1-25)")]))
+  .addSubcommand(sub("order", "View a specific order", [opt("id", "Order / invoice ID", true)]))
+  .addSubcommand(sub("invoices", "List recent invoices", [opt("limit", "How many (1-25)")]))
+  .addSubcommand(sub("coupons", "List all coupons"))
+  .addSubcommand(sub("addcoupon", "Create a discount coupon", [opt("code", "Coupon code", true), opt("discount", "Discount amount", true), opt("type", "Discount type", false, ["percentage", "fixed"]), opt("max_uses", "Maximum uses")]))
+  .addSubcommand(sub("deletecoupon", "Delete a coupon", [opt("code", "Coupon code or ID", true)]))
+  .addSubcommand(sub("blacklist", "List blacklist entries"))
+  .addSubcommand(sub("blacklistadd", "Add an entry to the blacklist", [opt("value", "Value to block", true), opt("type", "Entry type", false, ["email", "email_domain", "discord_id", "country_code", "ip"]), opt("reason", "Reason")]))
+  .addSubcommand(sub("blacklistremove", "Remove a blacklist entry", [opt("value", "Value or entry ID", true)]))
+  .addSubcommand(sub("shopinfo", "View shop details"))
+  .addSubcommand(sub("revenue", "Check revenue and stats"))
+  .addSubcommand(sub("topproducts", "View top 5 products by revenue"))
+  .addSubcommand(sub("help", "Show every /sa subcommand with usage examples"))
+  .toJSON();
+
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
@@ -120,12 +186,51 @@ client.once("clientReady", async () => {
 
   try {
     const rest = new REST({ version: "10" }).setToken(token);
-    await rest.put(Routes.applicationCommands(client.user.id), { body: [stockCommand] });
-    console.log("Registered /stock");
+    await rest.put(Routes.applicationCommands(client.user.id), {
+      body: [stockCommand, eldoradoCommand, saCommand],
+    });
+    console.log("Registered /stock, /eldorado and /sa");
   } catch (err) {
-    console.error("Could not register /stock:", err);
+    console.error("Could not register commands:", err);
   }
 });
+
+// /eldorado — forwarded to the dashboard, which re-checks roles.
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand() || interaction.commandName !== "eldorado") return;
+  const sub = interaction.options.getSubcommand();
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const options = {};
+  for (const key of ["id", "query"]) {
+    const v = interaction.options.getString(key);
+    if (v) options[key] = v;
+  }
+
+  try {
+    const res = await fetch(SITE + "/api/public/discord/eldorado", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bot " + token },
+      body: JSON.stringify({
+        sub,
+        options,
+        guildId: interaction.guildId,
+        roles: interaction.member?.roles?.cache
+          ? [...interaction.member.roles.cache.keys()]
+          : (interaction.member?.roles ?? []),
+        actor: interaction.user.username,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    await interaction.editReply(
+      data.content || "⚠️ The Eldorado request failed (HTTP " + res.status + ")."
+    );
+  } catch (err) {
+    console.error("eldorado relay failed:", err);
+    await interaction.editReply("⚠️ Could not reach the VWI Sorter dashboard.");
+  }
+});
+
 
 // Live pickers: suggest real products / variants from the dashboard.
 client.on("interactionCreate", async (interaction) => {
@@ -208,6 +313,45 @@ client.on("interactionCreate", async (interaction) => {
   } catch (err) {
     console.error("stock relay failed:", err);
     await interaction.editReply("⚠️ Could not reach the VWI Sorter dashboard. Check the SITE URL and try again.");
+  }
+});
+
+// /sa — SellAuth shop management, forwarded to the dashboard (roles re-checked there).
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand() || interaction.commandName !== "sa") return;
+  const sub = interaction.options.getSubcommand();
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const options = {};
+  for (const key of ["product", "search", "name", "price", "description", "variant", "currency", "confirm", "id", "limit", "code", "discount", "type", "max_uses", "value", "reason"]) {
+    const v = interaction.options.getString(key);
+    if (v) options[key] = v;
+  }
+
+  try {
+    const res = await fetch(SITE + "/api/public/discord/sellauth", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bot " + token },
+      body: JSON.stringify({
+        sub,
+        options,
+        guildId: interaction.guildId,
+        roles: interaction.member?.roles?.cache
+          ? [...interaction.member.roles.cache.keys()]
+          : (interaction.member?.roles ?? []),
+        actor: interaction.user.username,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    const payload = {};
+    if (data.content) payload.content = data.content;
+    if (Array.isArray(data.embeds) && data.embeds.length) payload.embeds = data.embeds;
+    if (!payload.content && !payload.embeds)
+      payload.content = "⚠️ The SellAuth request failed (HTTP " + res.status + ").";
+    await interaction.editReply(payload);
+  } catch (err) {
+    console.error("sa relay failed:", err);
+    await interaction.editReply("⚠️ Could not reach the VWI Sorter dashboard.");
   }
 });
 
