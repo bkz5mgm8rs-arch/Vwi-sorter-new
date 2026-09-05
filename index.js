@@ -222,9 +222,12 @@ client.on("interactionCreate", async (interaction) => {
       }),
     });
     const data = await res.json().catch(() => ({}));
-    await interaction.editReply(
-      data.content || "⚠️ The Eldorado request failed (HTTP " + res.status + ")."
-    );
+    const payload = {};
+    if (data.content && data.content !== "unauthorized") payload.content = data.content;
+    if (Array.isArray(data.embeds) && data.embeds.length) payload.embeds = data.embeds;
+    if (!payload.content && !payload.embeds)
+      payload.content = "⚠️ The Eldorado request failed (HTTP " + res.status + ").";
+    await interaction.editReply(payload);
   } catch (err) {
     console.error("eldorado relay failed:", err);
     await interaction.editReply("⚠️ Could not reach the VWI Sorter dashboard.");
