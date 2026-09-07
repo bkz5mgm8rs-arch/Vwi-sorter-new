@@ -1,6 +1,7 @@
 import {
   Client,
   GatewayIntentBits,
+  Partials,
   ActivityType,
   REST,
   Routes,
@@ -18,6 +19,16 @@ const token = (process.env.DISCORD_BOT_TOKEN ?? "")
 const SITE = (process.env.VWI_SITE_URL ?? "https://blacklistmp-vwi-sorter.lovable.app")
   .trim()
   .replace(/\/+$/, "");
+
+const errorReply = (title, description) => ({
+  embeds: [{
+    title: `⚠️ ${title}`,
+    description,
+    color: 0xef4444,
+    footer: { text: "blacklistMP · VWI Sorter" },
+    timestamp: new Date().toISOString(),
+  }],
+});
 
 if (!token) {
   console.error(
@@ -201,8 +212,44 @@ const replacementsCommand = new SlashCommandBuilder()
   .addSubcommand((s) => s.setName("stock").setDescription("Replacement stock available right now"))
   .toJSON();
 
+// /portal — gives any buyer a private link to their buyer portal, where they
+// can check replacement status and message the shop. Works in servers and DMs.
+const portalCommand = new SlashCommandBuilder()
+  .setName("portal")
+  .setDescription("Get your private buyer portal link (orders, replacements, messages)")
+  .toJSON();
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.DirectMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+  partials: [Partials.Channel, Partials.Message],
+});
+
+// Buyer DMs to the bot are forwarded to the dashboard's Buyer DMs tab.
+client.on("messageCreate", async (message) => {
+  try {
+    if (message.author?.bot) return;
+    if (message.guildId) return; // DMs only
+    const content = (message.content || "").trim();
+    if (!content) return;
+    const res = await fetch(SITE + "/api/public/discord/dm", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bot " + token },
+      body: JSON.stringify({
+        userId: message.author.id,
+        username: message.author.username,
+        content,
+      }),
+    });
+    if (res.ok) await message.react("\u2705").catch(() => {});
+  } catch (err) {
+    console.error("dm relay failed:", err);
+  }
+});
 
 client.once("clientReady", async () => {
   console.log("Online as", client.user.tag);
@@ -214,9 +261,9 @@ client.once("clientReady", async () => {
   try {
     const rest = new REST({ version: "10" }).setToken(token);
     await rest.put(Routes.applicationCommands(client.user.id), {
-      body: [stockCommand, eldoradoCommand, saCommand, replacementsCommand],
+      body: [stockCommand, eldoradoCommand, saCommand, replacementsCommand, portalCommand],
     });
-    console.log("Registered /stock, /eldorado, /sa and /replacements");
+    console.log("Registered /stock, /eldorado, /sa, /replacements and /portal");
   } catch (err) {
     console.error("Could not register commands:", err);
   }
@@ -414,12 +461,32 @@ client.on("interactionCreate", async (interaction) => {
     if (data.content && data.content !== "unauthorized") payload.content = data.content;
     if (Array.isArray(data.embeds) && data.embeds.length) payload.embeds = data.embeds;
     if (!payload.content && !payload.embeds)
-      payload.content = "⚠️ The replacement request failed (HTTP " + res.status + ").";
+      Object.assign(payload, errorReply("Replacement request failed", "The dashboard returned HTTP " + res.status + ". Please try again shortly."));
     await interaction.editReply(payload);
   } catch (err) {
     console.error("replacements relay failed:", err);
-    await interaction.editReply("⚠️ Could not reach the VWI Sorter dashboard.");
+    await interaction.editReply(errorReply("Dashboard unavailable", "I couldn't reach VWI Sorter. Check the site address and try again."));
   }
+});
+
+// /portal — public, buyer-facing: hands out the private portal link.
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand() || interaction.commandName !== "portal") return;
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await interaction.editReply({
+    embeds: [{
+      title: "🛒 blacklistMP · Buyer Portal",
+      description:
+        "Track your orders, see replacement approvals and chat with the shop — all in one place.\n\n" +
+        "**How to sign in**\n" +
+        "1️⃣ Open your portal: [blacklistmp-vwi-sorter.lovable.app/portal](" + SITE + "/portal)\n" +
+        "2️⃣ Enter your **order number** and the **email** you bought with\n" +
+        "3️⃣ We'll DM you a **6-digit code** — enter it and you're in",
+      color: 0xf97316,
+      footer: { text: "blacklistMP · VWI Sorter" },
+      timestamp: new Date().toISOString(),
+    }],
+  });
 });
 
 client.login(token).catch((err) => {
