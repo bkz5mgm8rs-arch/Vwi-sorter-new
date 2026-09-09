@@ -210,7 +210,25 @@ const replacementsCommand = new SlashCommandBuilder()
       .addIntegerOption((o) => o.setName("limit").setDescription("How many to show (1-20)"))
   )
   .addSubcommand((s) => s.setName("stock").setDescription("Replacement stock available right now"))
+  .addSubcommand((s) =>
+    s
+      .setName("setchannel")
+      .setDescription("Use the channel you run this in for requests, logs or the panel")
+      .addStringOption((o) =>
+        o
+          .setName("type")
+          .setDescription("Which channel to set")
+          .setRequired(true)
+          .addChoices(
+            { name: "Requests (new replacement requests)", value: "requests" },
+            { name: "Logs (activity log)", value: "logs" },
+            { name: "Panel (replacement panel)", value: "panel" },
+          )
+      )
+  )
+  .addSubcommand((s) => s.setName("channels").setDescription("Show which channels are currently wired up"))
   .toJSON();
+
 
 // /portal — gives any buyer a private link to their buyer portal, where they
 // can check replacement status and message the shop. Works in servers and DMs.
@@ -441,6 +459,13 @@ client.on("interactionCreate", async (interaction) => {
   const options = {};
   const limit = interaction.options.getInteger("limit");
   if (limit !== null && limit !== undefined) options.limit = String(limit);
+  const type = interaction.options.getString("type");
+  if (type) options.type = type;
+  if (sub === "setchannel") {
+    options.channelId = interaction.channelId ?? "";
+    options.channelName = interaction.channel?.name ?? "";
+  }
+
 
   try {
     const res = await fetch(SITE + "/api/public/discord/replacements", {
