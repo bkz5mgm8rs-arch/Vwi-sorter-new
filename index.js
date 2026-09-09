@@ -237,6 +237,42 @@ const portalCommand = new SlashCommandBuilder()
   .setDescription("Get your private buyer portal link (orders, replacements, messages)")
   .toJSON();
 
+// /seller — the Eldorado Seller Workspace, straight from Discord.
+const sellerCommand = new SlashCommandBuilder()
+  .setName("seller")
+  .setDescription("Eldorado Seller Workspace")
+  .addSubcommand((s) => s.setName("overview").setDescription("Connection, inventory, offers and order totals"))
+  .addSubcommand((s) => s.setName("stock").setDescription("List available and listed accounts"))
+  .addSubcommand((s) => s.setName("offers").setDescription("List cached Eldorado offers"))
+  .addSubcommand((s) => s.setName("orders").setDescription("List recent Eldorado orders"))
+  .addSubcommand((s) =>
+    s
+      .setName("order")
+      .setDescription("View one synced order")
+      .addStringOption((o) => o.setName("id").setDescription("Order ID").setRequired(true))
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("search")
+      .setDescription("Search inventory by ID, offer or title")
+      .addStringOption((o) => o.setName("query").setDescription("What to look for").setRequired(true))
+  )
+  .addSubcommand((s) => s.setName("sync").setDescription("Sync offers, orders and inventory"))
+  .toJSON();
+
+// /quickactions — the staff quick actions panel.
+const quickActionsCommand = new SlashCommandBuilder()
+  .setName("quickactions")
+  .setDescription("Open the VWI Sorter quick actions panel")
+  .toJSON();
+
+// /replacement-panel — posts the buyer-facing Auto Account Replacer panel.
+const replacementPanelCommand = new SlashCommandBuilder()
+  .setName("replacement-panel")
+  .setDescription("Post the Auto Account Replacer panel in this channel (staff only)")
+  .toJSON();
+
+
 
 const client = new Client({
   intents: [
@@ -279,9 +315,20 @@ client.once("clientReady", async () => {
   try {
     const rest = new REST({ version: "10" }).setToken(token);
     await rest.put(Routes.applicationCommands(client.user.id), {
-      body: [stockCommand, eldoradoCommand, saCommand, replacementsCommand, portalCommand],
+      body: [
+        stockCommand,
+        eldoradoCommand,
+        saCommand,
+        replacementsCommand,
+        portalCommand,
+        sellerCommand,
+        quickActionsCommand,
+        replacementPanelCommand,
+      ],
     });
-    console.log("Registered /stock, /eldorado, /sa, /replacements and /portal");
+    console.log(
+      "Registered /stock, /eldorado, /sa, /replacements, /portal, /seller, /quickactions and /replacement-panel"
+    );
   } catch (err) {
     console.error("Could not register commands:", err);
   }
@@ -491,6 +538,80 @@ client.on("interactionCreate", async (interaction) => {
   } catch (err) {
     console.error("replacements relay failed:", err);
     await interaction.editReply(errorReply("Dashboard unavailable", "I couldn't reach VWI Sorter. Check the site address and try again."));
+  }
+});
+
+// /seller — Eldorado Seller Workspace, forwarded to the dashboard.
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand() || interaction.commandName !== "seller") return;
+  const sub = interaction.options.getSubcommand();
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const options = {};
+  for (const key of ["id", "query"]) {
+    const v = interaction.options.getString(key);
+    if (v) options[key] = v;
+  }
+
+  try {
+    const res = await fetch(SITE + "/api/public/discord/eldorado", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bot " + token },
+      body: JSON.stringify({
+        sub,
+        options,
+        guildId: interaction.guildId,
+        roles: interaction.member?.roles?.cache
+          ? [...interaction.member.roles.cache.keys()]
+          : (interaction.member?.roles ?? []),
+        actor: interaction.user.username,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    const payload = {};
+    if (data.content && data.content !== "unauthorized") payload.content = data.content;
+    if (Array.isArray(data.embeds) && data.embeds.length) payload.embeds = data.embeds;
+    if (!payload.content && !payload.embeds)
+      Object.assign(payload, errorReply("Seller request failed", "The dashboard returned HTTP " + res.status + "."));
+    await interaction.editReply(payload);
+  } catch (err) {
+    console.error("seller relay failed:", err);
+    await interaction.editReply(errorReply("Dashboard unavailable", "I couldn't reach VWI Sorter."));
+  }
+});
+
+// /quickactions and /replacement-panel — panels built by the dashboard.
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+  const kind = interaction.commandName;
+  if (kind !== "quickactions" && kind !== "replacement-panel") return;
+  const isPanel = kind === "replacement-panel";
+  await interaction.deferReply(isPanel ? {} : { flags: MessageFlags.Ephemeral });
+
+  try {
+    const res = await fetch(SITE + "/api/public/discord/panel", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bot " + token },
+      body: JSON.stringify({
+        kind,
+        guildId: interaction.guildId,
+        roles: interaction.member?.roles?.cache
+          ? [...interaction.member.roles.cache.keys()]
+          : (interaction.member?.roles ?? []),
+        actor: interaction.user.username,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    const payload = {};
+    if (data.content && data.content !== "unauthorized") payload.content = data.content;
+    if (Array.isArray(data.embeds) && data.embeds.length) payload.embeds = data.embeds;
+    if (Array.isArray(data.components) && data.components.length) payload.components = data.components;
+    if (!payload.content && !payload.embeds)
+      Object.assign(payload, errorReply("Panel unavailable", "The dashboard returned HTTP " + res.status + "."));
+    await interaction.editReply(payload);
+  } catch (err) {
+    console.error("panel relay failed:", err);
+    await interaction.editReply(errorReply("Dashboard unavailable", "I couldn't reach VWI Sorter."));
   }
 });
 
