@@ -278,7 +278,16 @@ const replacementPanelCommand = new SlashCommandBuilder()
   .setDescription("Post the Auto Account Replacer panel in this channel (staff only)")
   .toJSON();
 
-
+const COMMAND_BODY = [
+  stockCommand,
+  eldoradoCommand,
+  saCommand,
+  replacementsCommand,
+  portalCommand,
+  sellerCommand,
+  quickActionsCommand,
+  replacementPanelCommand,
+];
 
 const client = new Client({
   intents: [
@@ -289,12 +298,25 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message],
 });
 
+function memberRoles(member) {
+  if (member?.roles?.cache) return [...member.roles.cache.keys()];
+  return member?.roles ?? [];
+}
+
 // Buyer DMs to the bot are forwarded to the dashboard's Buyer DMs tab.
 client.on("messageCreate", async (message) => {
   try {
     if (message.author?.bot) return;
     if (message.guildId) return; // DMs only
-    const content = (message.content || "").trim();
+    let content = (message.content || "").trim();
+    const attachments = (message.attachments?.cache?.values?.() ?? []);
+    const urls = [];
+    for (const att of attachments) {
+      if (att?.url) urls.push(att.url);
+    }
+    if (urls.length) {
+      content = content ? `${content}\n${urls.join("\n")}` : urls.join("\n");
+    }
     if (!content) return;
     const res = await fetch(SITE + "/api/public/discord/dm", {
       method: "POST",
@@ -319,19 +341,8 @@ async function onReady() {
   console.log("Online as", client.user.tag);
   client.user.setPresence({
     status: "online",
-    activities: [{ name: "VWI Sorter", type: ActivityType.Watching }],
+    activities: [{ name: "blacklistMP · VWI Sorter", type: ActivityType.Watching }],
   });
-
-  const body = [
-    stockCommand,
-    eldoradoCommand,
-    saCommand,
-    replacementsCommand,
-    portalCommand,
-    sellerCommand,
-    quickActionsCommand,
-    replacementPanelCommand,
-  ];
 
   try {
     const rest = new REST({ version: "10" }).setToken(token);
@@ -348,8 +359,8 @@ async function onReady() {
 
     for (const guildId of guildIds) {
       try {
-        await rest.put(Routes.applicationGuildCommands(client.user.id, guildId), { body });
-        console.log(`Registered ${body.length} commands in server ${guildId}`);
+        await rest.put(Routes.applicationGuildCommands(client.user.id, guildId), { body: COMMAND_BODY });
+        console.log(`Registered ${COMMAND_BODY.length} commands in server ${guildId}`);
       } catch (err) {
         console.error(
           `Could not register commands in server ${guildId} — re-invite the bot with the ` +
@@ -360,7 +371,7 @@ async function onReady() {
     }
 
     // Global registration as the fallback for servers joined later.
-    await rest.put(Routes.applicationCommands(client.user.id), { body });
+    await rest.put(Routes.applicationCommands(client.user.id), { body: COMMAND_BODY });
     console.log(
       "Registered /stock, /eldorado, /sa, /replacements, /portal, /seller, /quickactions and /replacement-panel"
     );
@@ -377,18 +388,7 @@ client.once("clientReady", onReady);
 client.on("guildCreate", async (guild) => {
   try {
     const rest = new REST({ version: "10" }).setToken(token);
-    await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), {
-      body: [
-        stockCommand,
-        eldoradoCommand,
-        saCommand,
-        replacementsCommand,
-        portalCommand,
-        sellerCommand,
-        quickActionsCommand,
-        replacementPanelCommand,
-      ],
-    });
+    await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: COMMAND_BODY });
     console.log("Registered commands in new server", guild.id);
   } catch (err) {
     console.error("Could not register commands in new server:", err?.message ?? err);
@@ -416,9 +416,7 @@ client.on("interactionCreate", async (interaction) => {
         sub,
         options,
         guildId: interaction.guildId,
-        roles: interaction.member?.roles?.cache
-          ? [...interaction.member.roles.cache.keys()]
-          : (interaction.member?.roles ?? []),
+        roles: memberRoles(interaction.member),
         actor: interaction.user.username,
       }),
     });
@@ -499,9 +497,7 @@ client.on("interactionCreate", async (interaction) => {
         sub: apiSub,
         options,
         guildId: interaction.guildId,
-        roles: interaction.member?.roles?.cache
-          ? [...interaction.member.roles.cache.keys()]
-          : (interaction.member?.roles ?? []),
+        roles: memberRoles(interaction.member),
         actor: interaction.user.username,
       }),
     });
@@ -540,9 +536,7 @@ client.on("interactionCreate", async (interaction) => {
         sub,
         options,
         guildId: interaction.guildId,
-        roles: interaction.member?.roles?.cache
-          ? [...interaction.member.roles.cache.keys()]
-          : (interaction.member?.roles ?? []),
+        roles: memberRoles(interaction.member),
         actor: interaction.user.username,
       }),
     });
@@ -586,9 +580,7 @@ client.on("interactionCreate", async (interaction) => {
         sub,
         options,
         guildId: interaction.guildId,
-        roles: interaction.member?.roles?.cache
-          ? [...interaction.member.roles.cache.keys()]
-          : (interaction.member?.roles ?? []),
+        roles: memberRoles(interaction.member),
         actor: interaction.user.username,
       }),
     });
@@ -625,9 +617,7 @@ client.on("interactionCreate", async (interaction) => {
         sub,
         options,
         guildId: interaction.guildId,
-        roles: interaction.member?.roles?.cache
-          ? [...interaction.member.roles.cache.keys()]
-          : (interaction.member?.roles ?? []),
+        roles: memberRoles(interaction.member),
         actor: interaction.user.username,
       }),
     });
@@ -659,9 +649,7 @@ client.on("interactionCreate", async (interaction) => {
       body: JSON.stringify({
         kind,
         guildId: interaction.guildId,
-        roles: interaction.member?.roles?.cache
-          ? [...interaction.member.roles.cache.keys()]
-          : (interaction.member?.roles ?? []),
+        roles: memberRoles(interaction.member),
         actor: interaction.user.username,
       }),
     });
@@ -708,9 +696,7 @@ client.on("interactionCreate", async (interaction) => {
   const cid = interaction.customId ?? "";
   if (!cid.startsWith("rep:") && !cid.startsWith("rep_modal:")) return;
 
-  const roles = interaction.member?.roles?.cache
-    ? [...interaction.member.roles.cache.keys()]
-    : (interaction.member?.roles ?? []);
+  const roles = memberRoles(interaction.member);
 
   const payload = {
     type: isModal ? 5 : 3,
@@ -729,6 +715,12 @@ client.on("interactionCreate", async (interaction) => {
   };
 
   try {
+    // Modal submissions (form submits) can take a few seconds to verify the
+    // order and reserve stock. Defer first so Discord doesn't time us out.
+    if (!isModal) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    }
+
     const res = await fetch(SITE + "/api/public/discord/rep-interaction", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bot " + token },
@@ -737,13 +729,17 @@ client.on("interactionCreate", async (interaction) => {
     const out = await res.json().catch(() => ({}));
 
     // Modal response — pop the form open for the buyer.
-    if (out.type === 9 && out.data && interaction.showModal) {
+    if (out.type === 9 && interaction.showModal) {
       await interaction.showModal(out.data);
       return;
     }
 
     const data = out.data ?? { content: "⚠️ No response from the dashboard.", flags: MessageFlags.Ephemeral };
-    await interaction.reply(data);
+    if (isModal) {
+      await interaction.reply(data);
+    } else {
+      await interaction.editReply(data);
+    }
   } catch (err) {
     console.error("replacement interaction relay failed:", err);
     const fail = { content: "⚠️ Something went wrong handling that action.", flags: MessageFlags.Ephemeral };
