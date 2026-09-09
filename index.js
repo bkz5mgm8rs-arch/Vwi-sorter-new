@@ -305,16 +305,73 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-client.once("clientReady", async () => {
+let didStart = false;
+async function onReady() {
+  if (didStart) return;
+  didStart = true;
+
   console.log("Online as", client.user.tag);
   client.user.setPresence({
     status: "online",
     activities: [{ name: "VWI Sorter", type: ActivityType.Watching }],
   });
 
+  const body = [
+    stockCommand,
+    eldoradoCommand,
+    saCommand,
+    replacementsCommand,
+    portalCommand,
+    sellerCommand,
+    quickActionsCommand,
+    replacementPanelCommand,
+  ];
+
   try {
     const rest = new REST({ version: "10" }).setToken(token);
-    await rest.put(Routes.applicationCommands(client.user.id), {
+
+    // Register per-server first: guild commands show up instantly, while
+    // global ones can take up to an hour to appear in Discord.
+    const guildIds = new Set(
+      (process.env.DISCORD_GUILD_ID ?? "")
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean),
+    );
+    for (const guild of client.guilds.cache.values()) guildIds.add(guild.id);
+
+    for (const guildId of guildIds) {
+      try {
+        await rest.put(Routes.applicationGuildCommands(client.user.id, guildId), { body });
+        console.log(`Registered ${body.length} commands in server ${guildId}`);
+      } catch (err) {
+        console.error(
+          `Could not register commands in server ${guildId} — re-invite the bot with the ` +
+            "applications.commands scope:",
+          err?.message ?? err,
+        );
+      }
+    }
+
+    // Global registration as the fallback for servers joined later.
+    await rest.put(Routes.applicationCommands(client.user.id), { body });
+    console.log(
+      "Registered /stock, /eldorado, /sa, /replacements, /portal, /seller, /quickactions and /replacement-panel"
+    );
+  } catch (err) {
+    console.error("Could not register commands:", err);
+  }
+}
+
+// discord.js 14 emits "ready"; newer versions emit "clientReady".
+client.once("ready", onReady);
+client.once("clientReady", onReady);
+
+// Newly added servers get their commands right away too.
+client.on("guildCreate", async (guild) => {
+  try {
+    const rest = new REST({ version: "10" }).setToken(token);
+    await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), {
       body: [
         stockCommand,
         eldoradoCommand,
@@ -326,13 +383,12 @@ client.once("clientReady", async () => {
         replacementPanelCommand,
       ],
     });
-    console.log(
-      "Registered /stock, /eldorado, /sa, /replacements, /portal, /seller, /quickactions and /replacement-panel"
-    );
+    console.log("Registered commands in new server", guild.id);
   } catch (err) {
-    console.error("Could not register commands:", err);
+    console.error("Could not register commands in new server:", err?.message ?? err);
   }
 });
+
 
 // /eldorado — forwarded to the dashboard, which re-checks roles.
 client.on("interactionCreate", async (interaction) => {
