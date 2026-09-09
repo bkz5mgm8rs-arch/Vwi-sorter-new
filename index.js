@@ -205,6 +205,12 @@ const replacementsCommand = new SlashCommandBuilder()
   )
   .addSubcommand((s) =>
     s
+      .setName("view")
+      .setDescription("View one replacement request including the reserved account")
+      .addStringOption((o) => o.setName("invoice").setDescription("Order / invoice ID").setRequired(true))
+  )
+  .addSubcommand((s) =>
+    s
       .setName("logs")
       .setDescription("Full activity log: checks, attempts, approvals and denials")
       .addIntegerOption((o) => o.setName("limit").setDescription("How many to show (1-20)"))
@@ -564,6 +570,8 @@ client.on("interactionCreate", async (interaction) => {
   if (limit !== null && limit !== undefined) options.limit = String(limit);
   const type = interaction.options.getString("type");
   if (type) options.type = type;
+  const invoice = interaction.options.getString("invoice");
+  if (invoice) options.invoice = invoice;
   if (sub === "setchannel") {
     options.channelId = interaction.channelId ?? "";
     options.channelName = interaction.channel?.name ?? "";
@@ -689,6 +697,59 @@ client.on("interactionCreate", async (interaction) => {
       timestamp: new Date().toISOString(),
     }],
   });
+});
+
+// Replacement panel buttons, reason select and modals — relayed to the
+// dashboard, which answers with a reply or a modal to open.
+client.on("interactionCreate", async (interaction) => {
+  const isComponent = interaction.isButton?.() || interaction.isStringSelectMenu?.();
+  const isModal = interaction.isModalSubmit?.();
+  if (!isComponent && !isModal) return;
+  const cid = interaction.customId ?? "";
+  if (!cid.startsWith("rep:") && !cid.startsWith("rep_modal:")) return;
+
+  const roles = interaction.member?.roles?.cache
+    ? [...interaction.member.roles.cache.keys()]
+    : (interaction.member?.roles ?? []);
+
+  const payload = {
+    type: isModal ? 5 : 3,
+    guild_id: interaction.guildId ?? null,
+    data: {
+      custom_id: cid,
+      values: interaction.values ?? [],
+      components: isModal
+        ? interaction.components.map((row) => ({
+            components: row.components.map((c) => ({ custom_id: c.customId, value: c.value })),
+          }))
+        : undefined,
+    },
+    member: { roles, user: { id: interaction.user.id, username: interaction.user.username } },
+    user: { id: interaction.user.id, username: interaction.user.username },
+  };
+
+  try {
+    const res = await fetch(SITE + "/api/public/discord/rep-interaction", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bot " + token },
+      body: JSON.stringify(payload),
+    });
+    const out = await res.json().catch(() => ({}));
+
+    // Modal response — pop the form open for the buyer.
+    if (out.type === 9 && out.data && interaction.showModal) {
+      await interaction.showModal(out.data);
+      return;
+    }
+
+    const data = out.data ?? { content: "⚠️ No response from the dashboard.", flags: MessageFlags.Ephemeral };
+    await interaction.reply(data);
+  } catch (err) {
+    console.error("replacement interaction relay failed:", err);
+    const fail = { content: "⚠️ Something went wrong handling that action.", flags: MessageFlags.Ephemeral };
+    if (interaction.deferred || interaction.replied) await interaction.followUp(fail);
+    else await interaction.reply(fail).catch(() => undefined);
+  }
 });
 
 client.login(token).catch((err) => {
